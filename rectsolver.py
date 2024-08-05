@@ -1,6 +1,6 @@
-from pysat.formula import IDPool, Atom, And, Or, Equals
-from pysat.solvers import Solver
 import numpy as np
+from pysat.formula import And, Atom, Equals, IDPool, Or
+from pysat.solvers import Solver
 
 
 class RectSolver:
@@ -70,9 +70,13 @@ class RectSolver:
         formula = And(*[c for c in err_constraints], *
                       [And(*[c for c in constraints[k]]) for k in range(self.k_rect)])
 
+        # Find lower bound
         satisfiable = True
         bound = self.n * self.m
         last_model = None
+        last_bound = bound
+        largest_rect_arr = np.zeros(self.k_rect, dtype=int)
+        largest_rect = 0
         while satisfiable:
             with Solver(name='gc4', bootstrap_with=formula) as solver:
                 if not solver.solve():
@@ -86,7 +90,9 @@ class RectSolver:
                     solver.add_atmost(
                         # AMO(tj)
                         lits=[self.__t(k, j).name for j in range(self.m)], k=1)
-
+                for i in range(self.n):
+                    for j in range(self.m):
+                        solver.add_atmost(lits=[self.__s(k, i, j).name for k in range(self.k_rect)], k=1)
                 solver.add_atmost(lits=[self.__e(i, j).name for i in range(self.n)
                                   for j in range(self.m)], k=bound)
                 if solver.solve():
@@ -96,16 +102,60 @@ class RectSolver:
                         for j in range(self.m):
                             if self.__e(i, j).name in solver.get_model():
                                 new_bound += 1
+                            for k in range(self.k_rect):
+                                if self.__s(k, i, j).name in solver.get_model():
+                                    largest_rect_arr[k] += 1
+                    last_bound = bound
                     bound = new_bound - 1
+                    largest_rect = np.max(largest_rect_arr)
+                    largest_rect_arr = np.zeros(self.k_rect, dtype=int)
                 else:
                     satisfiable = False
 
-        rectangles = [np.zeros((self.n, self.m)) for k in range(self.k_rect)]
+
+        # Optimize for largest single rectangle
         if last_model:
+            satisfiable = True
+            while satisfiable:
+                with Solver(name='gc4', bootstrap_with=formula) as solver:
+                    if not solver.solve():
+                        raise Exception(
+                            "Error encountered with solver. Perhaps shape is too big?")
+
+                    for k in range(self.k_rect):
+                        solver.add_atmost(
+                            # AMO(li)
+                            lits=[self.__l(k, i).name for i in range(self.n)], k=1)
+                        solver.add_atmost(
+                            # AMO(tj)
+                            lits=[self.__t(k, j).name for j in range(self.m)], k=1)
+                    for i in range(self.n):
+                        for j in range(self.m):
+                            solver.add_atmost(lits=[self.__s(k, i, j).name for k in range(self.k_rect)], k=1)
+                    solver.add_atmost(lits=[self.__e(i, j).name for i in range(self.n)
+                                      for j in range(self.m)], k=last_bound)
+                    solver.add_atmost(lits=[-self.__s(0, i, j).name for i in range(self.n) for j in range(self.m)], k=self.n * self.m - largest_rect)
+
+                    if solver.solve():
+                        last_model = solver.get_model()
+                        for i in range(self.n):
+                            for j in range(self.m):
+                                for k in range(self.k_rect):
+                                    if self.__s(k, i, j).name in solver.get_model():
+                                        largest_rect_arr[k] += 1
+
+                        largest_rect = np.max(largest_rect_arr) + 1
+                        largest_rect_arr = np.zeros(self.k_rect, dtype=int)
+                    else:
+                        satisfiable = False
+
+            rectangles = [np.zeros((self.n, self.m)) for k in range(self.k_rect)]
+
             for i in range(self.n):
                 for j in range(self.m):
                     for k in range(self.k_rect):
                         if self.__s(k, i, j).name in last_model:
                             rectangles[k][i][j] = 1
+            return rectangles
 
-        return rectangles
+        return None
