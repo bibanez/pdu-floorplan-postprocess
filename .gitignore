@@ -1,6 +1,6 @@
 *.csv
 .ipynb_checkpoints
-__py_cache__
+__pycache__
 .virtual_documents
 # pixi environments
 .pixi
