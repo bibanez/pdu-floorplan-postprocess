@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
 from rectsolver import RectSolver
+import multiprocessing as mp
 
 
 def read_shape_from_csv(file_path):
@@ -10,9 +11,9 @@ def read_shape_from_csv(file_path):
 
 
 def extract_regions(shape):
-    # Get unique region indices
+    # Get unique region indices excluding 0
     unique_regions = np.unique(shape)
-    unique_regions = unique_regions[unique_regions >= 0]
+    unique_regions = unique_regions[unique_regions != 0]
 
     regions = []
 
@@ -28,9 +29,18 @@ def extract_regions(shape):
         for r, c in indices:
             subarray[r - min_row, c - min_col] = 1
 
-        regions.append(subarray)
+        regions.append((region, subarray))
 
     return regions
+
+
+def solve_region(region_data, conn):
+    region, subarray = region_data
+    k_rect = 3  # Adjust this as needed
+    r = RectSolver(subarray, k_rect)
+    results = [rect for rect in r.solve()]
+    conn.send((region, results))
+    conn.close()
 
 
 def main():
@@ -41,15 +51,28 @@ def main():
     # Extract regions from the shape
     regions = extract_regions(shape)
 
-    # Use RectSolver for each region
-    k_rect = 3  # You may want to adjust this for each region
-    for i, region in enumerate(regions):
-        print(f"Processing region {i+1}:")
-        print(region)
-        r = RectSolver(region, k_rect)
-        for rect in r.solve():
+    processes = []
+    parent_conns = []
+
+    # Create a process for each region
+    for region_data in regions:
+        parent_conn, child_conn = mp.Pipe()
+        p = mp.Process(target=solve_region, args=(region_data, child_conn))
+        processes.append(p)
+        parent_conns.append(parent_conn)
+        p.start()
+
+    # Collect results from all processes
+    for parent_conn in parent_conns:
+        region, rects = parent_conn.recv()
+        print(f"Results for region {region}:")
+        for rect in rects:
             print(rect)
             print("\n" + "="*20 + "\n")
+
+    # Ensure all processes have finished
+    for p in processes:
+        p.join()
 
 
 if __name__ == "__main__":
